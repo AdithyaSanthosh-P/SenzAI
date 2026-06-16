@@ -51,15 +51,31 @@ public class ShootingController : MonoBehaviour
 
         if (didHit)
         {
-            Debug.Log($"Hit {hit.collider.name} at {hit.distance:F1}m");
-
             TargetController target = hit.collider.GetComponent<TargetController>();
+
             if (target != null)
+            {
+                Debug.Log($"Hit {hit.collider.name} at {hit.distance:F1}m");
                 target.OnTargetHit();
+
+                if (SessionLogger.Instance != null)
+                    SessionLogger.Instance.LogShot(true, hit.distance, hit.collider.name);
+            }
+            else
+            {
+                // hit a wall/ground/obstacle — counts as miss
+                Debug.Log("Miss (hit environment)");
+
+                if (SessionLogger.Instance != null)
+                    SessionLogger.Instance.LogShot(false, -1f, "none");
+            }
         }
         else
         {
             Debug.Log("Miss");
+
+            if (SessionLogger.Instance != null)
+                SessionLogger.Instance.LogShot(false, -1f, "none");
         }
     }
 
