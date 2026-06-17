@@ -11,6 +11,14 @@ public class TargetController : MonoBehaviour
     }
 
     [SerializeField] private float respawnDelay = 0.5f;
+
+    [Header("Respawn Bounds")]
+    [SerializeField] private float minRespawnX = -10f;
+    [SerializeField] private float maxRespawnX =  10f;
+    [SerializeField] private float minRespawnZ =  30f;
+    [SerializeField] private float maxRespawnZ =  55f;
+    [SerializeField] private float minRespawnY =   1f;
+    [SerializeField] private float maxRespawnY =   4f;
     [SerializeField] private Color hitColor = Color.red;
     [SerializeField] private float hitFlashDuration = 0.1f;
 
@@ -86,6 +94,27 @@ public class TargetController : MonoBehaviour
         {
             rend.material.color = startColor;
         }
+
+        Respawn();
+    }
+
+    void Respawn()
+    {
+        float x = Random.Range(minRespawnX, maxRespawnX);
+        float z = Random.Range(minRespawnZ, maxRespawnZ);
+        float y = Random.Range(minRespawnY, maxRespawnY);
+
+        Vector3 newPos = new Vector3(x, y, z);
+        transform.position = newPos;
+
+        // Reset movement state so patterns restart from the new position
+        startPos = newPos;
+        bobTime = 0f;
+        orbitAngle = Random.Range(0f, 360f);
+        wanderTarget = newPos;
+        wanderTimer = 0f;
+
+        Debug.Log("Target respawned at " + newPos);
     }
 
     void HandleMovement()
