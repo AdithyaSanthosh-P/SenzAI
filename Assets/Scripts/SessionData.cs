@@ -11,5 +11,11 @@ public class SessionData
     public int totalHits;
     public float accuracy;
     public float avgHitDistance;
+
+    // sensitivity range this session was played at
+    public float minSensitivity;
+    public float maxSensitivity;
+    public float avgSensitivity;
+
     public List<ShotData> shots;
 }

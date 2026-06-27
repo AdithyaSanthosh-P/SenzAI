@@ -7,16 +7,20 @@ public class StatsDisplay : MonoBehaviour
     [SerializeField] private TextMeshProUGUI shotsText;
     [SerializeField] private TextMeshProUGUI timerText;
 
-    private float sessionStart;
+    private float elapsed;   // accumulated play-time; pauses when SensPanel is open
 
     void Start()
     {
-        sessionStart = Time.time;
+        elapsed = 0f;
     }
 
     void Update()
     {
-        // thisll skip if SessionLogger isn't in the scene yet
+        // Freeze everything while the ESC panel is open
+        if (SensitivityUI.PanelOpen) return;
+
+        elapsed += Time.deltaTime;
+
         if (SessionLogger.Instance == null)
             return;
 
@@ -28,7 +32,6 @@ public class StatsDisplay : MonoBehaviour
         if (shotsText != null)
             shotsText.text = $"Shots: {stats.TotalHits}/{stats.TotalShots}";
 
-        float elapsed = Time.time - sessionStart;
         if (timerText != null)
             timerText.text = $"Time: {elapsed:F0}s";
     }

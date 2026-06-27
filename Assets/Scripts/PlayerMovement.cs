@@ -27,6 +27,9 @@ public class PlayerMovement : MonoBehaviour
 
     private void Update()
     {
+        // Freeze player input while ESC panel is open
+        if (SensitivityUI.PanelOpen) return;
+
         MovePlayer();
     }
 

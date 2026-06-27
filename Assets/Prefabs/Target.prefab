@@ -68,7 +68,7 @@ MeshRenderer:
   m_RenderingLayerMask: 1
   m_RendererPriority: 0
   m_Materials:
-  - {fileID: 2100000, guid: 31321ba15b8f8eb4c954353edc038b1d, type: 2}
+  - {fileID: 2100000, guid: c2e40fa84d53ccd428f640eac126b1fb, type: 2}
   m_StaticBatchInfo:
     firstSubMesh: 0
     subMeshCount: 0
@@ -126,8 +126,18 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::TargetController
   respawnDelay: 0.5
-  hitColor: {r: 1, g: 0, b: 0, a: 1}
-  hitFlashDuration: 0.1
+  minRespawnX: -10
+  maxRespawnX: 10
+  minRespawnZ: 30
+  maxRespawnZ: 55
+  minRespawnY: 1
+  maxRespawnY: 4
+  hitFlashColor: {r: 1, g: 0.35, b: 0.1, a: 1}
+  reappearFlashDuration: 0.12
+  hitSound: {fileID: 0}
+  hitVolume: 0.85
+  respawnSound: {fileID: 0}
+  respawnVolume: 0.5
   pattern: 0
   moveSpeed: 1.5
   moveDistance: 2

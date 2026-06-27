@@ -14,7 +14,16 @@ public class MouseLook : MonoBehaviour
     private float xRotation;
     private bool cursorLocked = true;
 
+    // last-frame mouse delta magnitude — ShootingController samples this at fire time
+    private float lastMouseSpeed;
+
     public float CurrentPitch => xRotation;
+
+    // public read so ShootingController can log it per shot
+    public float CurrentSensitivity => sensitivity;
+
+    // magnitude of mouse delta from the previous frame (pixels-ish)
+    public float CurrentMouseSpeed => lastMouseSpeed;
 
     private void Start()
     {
@@ -36,6 +45,7 @@ public class MouseLook : MonoBehaviour
             return;
 
         Vector2 mouseDelta = Mouse.current.delta.ReadValue();
+        lastMouseSpeed = mouseDelta.magnitude;
 
         float mouseX = mouseDelta.x * sensitivity;
         float mouseY = mouseDelta.y * sensitivity;
@@ -55,17 +65,25 @@ public class MouseLook : MonoBehaviour
         }
     }
 
+    // called by SensitivityUI when the player hits "Apply"
+    public void SetSensitivity(float newSens)
+    {
+        sensitivity = Mathf.Clamp(newSens, 0.01f, 2f);
+    }
+
+    // called by SensitivityUI.OpenPanel() to guarantee cursor is free,
+    // regardless of which script's Update() runs first on the ESC frame
+    public void ForceUnlockCursor() => UnlockCursor();
+
     private void HandleCursor()
     {
-        if (Keyboard.current == null || Mouse.current == null)
+        if (Mouse.current == null)
             return;
 
-        if (Keyboard.current.escapeKey.wasPressedThisFrame)
-        {
-            UnlockCursor();
-        }
-
+        // SensitivityUI owns the ESC toggle — don't duplicate it here.
+        // Only re-lock when: cursor is free AND the panel is closed AND player clicks in the world.
         if (!cursorLocked &&
+            !SensitivityUI.PanelOpen &&
             Mouse.current.leftButton.wasPressedThisFrame)
         {
             LockCursor();
