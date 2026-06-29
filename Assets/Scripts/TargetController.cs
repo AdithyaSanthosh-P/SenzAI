@@ -161,11 +161,20 @@ public class TargetController : MonoBehaviour
 
     private void Respawn()
     {
-        float x = Random.Range(minRespawnX, maxRespawnX);
-        float z = Random.Range(minRespawnZ, maxRespawnZ);
-        float y = Random.Range(minRespawnY, maxRespawnY);
+        Vector3 newPos;
 
-        Vector3 newPos = new Vector3(x, y, z);
+        if (TargetSpawner.Instance != null)
+        {
+            newPos = TargetSpawner.Instance.GetRespawnPosition(this.gameObject);
+        }
+        else
+        {
+            float x = Random.Range(minRespawnX, maxRespawnX);
+            float z = Random.Range(minRespawnZ, maxRespawnZ);
+            float y = Random.Range(minRespawnY, maxRespawnY);
+            newPos = new Vector3(x, y, z);
+        }
+
         transform.position = newPos;
 
         startPos     = newPos;

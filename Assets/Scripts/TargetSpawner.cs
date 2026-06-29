@@ -12,7 +12,10 @@ public class TargetSpawner : MonoBehaviour
     [Tooltip("Drag in the MapGenerator object, or leave empty to find it automatically")]
     public MapGenerator mapGenerator;
 
-    [Header("Manual Bounds  (used ONLY when no MapGenerator is found)")]
+    [Tooltip("If true, ignores the MapGenerator and strictly uses the Manual Bounds below.")]
+    public bool useManualBounds = false;
+
+    [Header("Manual Bounds")]
     public Vector3 manualBoundsMin = new Vector3(-4f, 0.5f,  3f);
     public Vector3 manualBoundsMax = new Vector3( 4f, 4.0f, 14f);
 
@@ -28,6 +31,13 @@ public class TargetSpawner : MonoBehaviour
     private Vector3      boundsMin;
     private Vector3      boundsMax;
 
+    public static TargetSpawner Instance { get; private set; }
+
+    void Awake()
+    {
+        Instance = this;
+    }
+
     void Start()
     {
         ResolveBounds();
@@ -36,21 +46,36 @@ public class TargetSpawner : MonoBehaviour
 
     private void ResolveBounds()
     {
+        if (useManualBounds)
+        {
+            boundsMin = manualBoundsMin;
+            boundsMax = manualBoundsMax;
+            Debug.Log("[TargetSpawner] Using strictly manual bounds.");
+            return;
+        }
+
         if (mapGenerator == null)
             mapGenerator = FindObjectOfType<MapGenerator>();
 
-        if (mapGenerator != null &&
-            mapGenerator.SpawnBoundsMax != mapGenerator.SpawnBoundsMin)
+        if (mapGenerator != null)
         {
-            boundsMin = mapGenerator.SpawnBoundsMin;
-            boundsMax = mapGenerator.SpawnBoundsMax;
-            Debug.Log($"[TargetSpawner] Using map bounds: {boundsMin} → {boundsMax}");
+            // Always compute live from the map's current dimensions —
+            // never read pre-baked serialized fields that may be stale.
+            float halfX  = mapGenerator.arenaWidth  * 0.5f - 0.8f;  // inset from side walls
+            float zNear  = 2.0f;                                      // don't spawn right behind player
+            float zFar   = mapGenerator.arenaLength - 1.5f;          // inset from target wall
+            float yLow   = 0.5f;
+            float yHigh  = mapGenerator.wallHeight  - 0.6f;
+
+            boundsMin = new Vector3(-halfX, yLow,  zNear);
+            boundsMax = new Vector3( halfX, yHigh, zFar);
+            Debug.Log($"[TargetSpawner] Live map bounds: {boundsMin} to {boundsMax}");
         }
         else
         {
             boundsMin = manualBoundsMin;
             boundsMax = manualBoundsMax;
-            Debug.LogWarning("[TargetSpawner] MapGenerator not found or bounds not set — using manual bounds.");
+            Debug.LogWarning("[TargetSpawner] No MapGenerator found — using manual bounds.");
         }
     }
 
@@ -105,6 +130,32 @@ public class TargetSpawner : MonoBehaviour
             Random.Range(boundsMin.x, boundsMax.x),
             Random.Range(boundsMin.y, boundsMax.y),
             Random.Range(boundsMin.z, boundsMax.z));
+    }
+
+    public Vector3 GetRespawnPosition(GameObject targetToRespawn)
+    {
+        if (targets == null) return RandomPointInBounds();
+
+        for (int attempt = 0; attempt < maxAttempts; attempt++)
+        {
+            Vector3 candidate = RandomPointInBounds();
+            bool tooClose = false;
+
+            for (int i = 0; i < targets.Length; i++)
+            {
+                if (targets[i] != null && targets[i] != targetToRespawn &&
+                    Vector3.Distance(candidate, targets[i].transform.position) < minSeparation)
+                {
+                    tooClose = true;
+                    break;
+                }
+            }
+
+            if (!tooClose)
+                return candidate;
+        }
+
+        return RandomPointInBounds();
     }
 
     public void RespawnAll()
