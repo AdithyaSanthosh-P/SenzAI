@@ -9,17 +9,36 @@ public class ShootingController : MonoBehaviour
     public LayerMask hitMask = ~0;
 
     [Header("Tracer")]
-    public Material tracerMaterial;                          // leave empty — auto-created at runtime
-    [Tooltip("Width of the tracer at the muzzle end.")]
-    public float tracerWidth    = 0.008f;                   // thin like a real bullet streak
-    [Tooltip("How long the tracer takes to fade out.")]
-    public float tracerLifetime = 0.12f;                    // slightly longer so it’s visible
-    [Tooltip("Colour of the tracer streak.")]
-    public Color tracerColor    = new Color(1f, 0.95f, 0.7f, 1f);  // warm yellow-white
-    [Tooltip("How far right of camera centre the tracer spawns (gun position).")]
-    public float gunOffsetRight = 0.25f;
-    [Tooltip("How far below camera centre the tracer spawns (gun position). Positive = down.")]
-    public float gunOffsetDown  = 0.20f;
+    public Material tracerMaterial;
+    [Tooltip("Width of the tracer core at its thickest point (tail).")]
+    public float tracerWidth      = 0.004f;
+    [Tooltip("Visual speed of the bullet in units/sec.")]
+    public float bulletSpeed      = 350f;
+    [Tooltip("Length of the visible streak segment in world units.")]
+    public float trailLength      = 2.5f;
+    [Tooltip("How fast the streak fades after reaching the hit point.")]
+    public float tracerFadeTime   = 0.06f;
+    [Tooltip("Base colour of the tracer.")]
+    public Color tracerColor      = new Color(1f, 0.97f, 0.75f, 1f);
+
+    [Header("Tracer Glow")]
+    [Tooltip("HDR brightness of the core streak. Values > 1 trigger URP/HDRP Bloom automatically.")]
+    [Range(1f, 8f)]
+    public float tracerBrightness = 4f;
+    [Tooltip("Draws a wide soft halo around the core streak (fake glow, works without post-processing).")]
+    public bool  glowHalo         = true;
+    [Tooltip("How many times wider the halo is vs the core.")]
+    [Range(2f, 12f)]
+    public float glowHaloScale    = 6f;
+    [Tooltip("Opacity of the outer halo (0 = invisible, 1 = same as core).")]
+    [Range(0f, 1f)]
+    public float glowHaloAlpha    = 0.25f;
+    [Tooltip("How far forward of the camera the muzzle sits (avoids disconnect).")]
+    public float gunOffsetForward = 0.4f;
+    [Tooltip("How far right of camera centre.")]
+    public float gunOffsetRight   = 0.12f;
+    [Tooltip("How far below camera centre.")]
+    public float gunOffsetDown    = 0.10f;
 
     [Header("Camera Shake")]
     public float shakeDuration  = 0.09f;
@@ -96,14 +115,14 @@ public class ShootingController : MonoBehaviour
         lastShotTime = Time.time;
         sessionShotIndex++;
 
-        // Muzzle position: offset from camera in world space so the tracer looks like
-        // it comes from a gun held at hip/chest level rather than straight from the eye.
-        // The raycast still fires from the true camera centre so hit detection is unaffected.
+        // Muzzle: pushed forward so the streak visually starts in front of you,
+        // not right beside the camera eye. The raycast origin is unchanged.
         Vector3 muzzlePos = cam.transform.position
+            + cam.transform.forward *  gunOffsetForward
             + cam.transform.right   *  gunOffsetRight
             + cam.transform.up      * -gunOffsetDown;
 
-        CreateTracer(muzzlePos, end);
+        StartCoroutine(AnimateTracer(muzzlePos, end));
 
         cameraShake?.Shake(shakeDuration, shakeMagnitude);
 
@@ -200,78 +219,174 @@ public class ShootingController : MonoBehaviour
         audioSource.PlayOneShot(clip, volume);
     }
 
-    private void CreateTracer(Vector3 start, Vector3 end)
+    // Returns an additive-blended material.
+    // Additive blending means the tracer's colour is ADDED to whatever is behind it,
+    // so it looks luminous/bright regardless of background and naturally glows when
+    // URP/HDRP Bloom is enabled (especially with tracerBrightness > 1).
+    private Material BuildAdditiveMaterial()
     {
-        GameObject tracerObj = new GameObject("Tracer");
-        LineRenderer line    = tracerObj.AddComponent<LineRenderer>();
-
-        // ── Material ──────────────────────────────────────────────────────────
-        // Use the assigned material if any; otherwise build a simple transparent one.
-        // "Sprites/Default" is guaranteed to exist in every Unity project and supports alpha.
         if (tracerMaterial != null)
+            return new Material(tracerMaterial);
+
+        // Shader priority: Particles/Additive (Built-in) → URP Particles Unlit (URP)
+        Shader sh = Shader.Find("Particles/Additive")
+                 ?? Shader.Find("Legacy Shaders/Particles/Additive")
+                 ?? Shader.Find("Universal Render Pipeline/Particles/Unlit")
+                 ?? Shader.Find("Sprites/Default");   // fallback (alpha-blend, not additive)
+
+        var mat = new Material(sh);
+
+        // If we landed on the Sprites/Default fallback, force additive blend manually
+        // so at least the blending is correct even if the shader doesn't expose it.
+        if (sh != null && sh.name.Contains("Sprites"))
         {
-            line.material = new Material(tracerMaterial); // instance so we can tint per-shot
-        }
-        else
-        {
-            Shader sh = Shader.Find("Sprites/Default");
-            if (sh == null) sh = Shader.Find("Unlit/Transparent");
-            if (sh == null) sh = Shader.Find("Legacy Shaders/Particles/Alpha Blended");
-            line.material       = new Material(sh != null ? sh : Shader.Find("Unlit/Color"));
-            line.material.color = tracerColor;
+            mat.SetInt("_SrcBlend", (int)BlendMode.One);
+            mat.SetInt("_DstBlend", (int)BlendMode.One);
+            mat.SetInt("_ZWrite",   0);
+            mat.DisableKeyword("_ALPHATEST_ON");
+            mat.EnableKeyword("_ALPHABLEND_ON");
+            mat.renderQueue = 3000;
         }
 
-        // ── Shape ─────────────────────────────────────────────────────────────
-        line.positionCount    = 2;
-        line.useWorldSpace    = true;
-        line.startWidth       = tracerWidth;          // wider at muzzle
-        line.endWidth         = tracerWidth * 0.05f;  // tapers to near-nothing at hit
-        line.startColor       = tracerColor;
-        line.endColor         = new Color(tracerColor.r, tracerColor.g, tracerColor.b, 0f);
-
-        // TextureMode.Stretch makes the texture run the full length (clean look).
-        // Alignment.View always faces the camera so it looks like a thin streak,
-        // not a flat plane that vanishes edge-on.
-        line.textureMode      = LineTextureMode.Stretch;
-        line.alignment        = LineAlignment.View;
-        line.shadowCastingMode = ShadowCastingMode.Off;
-        line.receiveShadows   = false;
-        line.generateLightingData = false;
-
-        line.SetPosition(0, start);
-        line.SetPosition(1, end);
-
-        StartCoroutine(FadeTracer(line, tracerObj));
+        return mat;
     }
 
-    // Smoothly shrinks and fades the tracer line over its lifetime, then destroys it.
-    private IEnumerator FadeTracer(LineRenderer line, GameObject tracerObj)
+    // Sets up a LineRenderer that shares the same positions as the core tracer
+    // but is wider and dimmer — creating a soft corona / glow halo effect.
+    private LineRenderer BuildGlowLayer(Transform parent)
     {
-        if (line == null || tracerObj == null) yield break;
+        GameObject glowObj = new GameObject("TracerGlow");
+        glowObj.transform.SetParent(parent, worldPositionStays: false);
 
-        Color   startColour = tracerColor;
-        Color   endColour   = new Color(tracerColor.r, tracerColor.g, tracerColor.b, 0f);
-        float   startWidth  = tracerWidth;
-        float   elapsed     = 0f;
+        LineRenderer glowLR         = glowObj.AddComponent<LineRenderer>();
+        glowLR.material             = BuildAdditiveMaterial();
+        glowLR.positionCount        = 2;
+        glowLR.useWorldSpace        = true;
+        glowLR.textureMode          = LineTextureMode.Stretch;
+        glowLR.alignment            = LineAlignment.View;
+        glowLR.shadowCastingMode    = ShadowCastingMode.Off;
+        glowLR.receiveShadows       = false;
+        glowLR.generateLightingData = false;
+        return glowLR;
+    }
 
-        while (elapsed < tracerLifetime)
+    // Animates a short bullet-streak from muzzle toward hitPoint.
+    // A fixed-length tail segment chases the bullet head across the scene,
+    // so it looks like a tracer round leaving the gun and traveling forward.
+    private IEnumerator AnimateTracer(Vector3 muzzle, Vector3 hitPoint)
+    {
+        // ── Core streak ────────────────────────────────────────────────────────
+        GameObject   go = new GameObject("TracerRoot");
+        LineRenderer lr = go.AddComponent<LineRenderer>();
+        lr.material             = BuildAdditiveMaterial();
+        lr.positionCount        = 2;
+        lr.useWorldSpace        = true;
+        lr.textureMode          = LineTextureMode.Stretch;
+        lr.alignment            = LineAlignment.View;
+        lr.shadowCastingMode    = ShadowCastingMode.Off;
+        lr.receiveShadows       = false;
+        lr.generateLightingData = false;
+        lr.SetPosition(0, muzzle);
+        lr.SetPosition(1, muzzle);
+
+        // ── Glow halo (optional wider outer layer) ─────────────────────────────
+        LineRenderer glowLR = glowHalo ? BuildGlowLayer(go.transform) : null;
+        if (glowLR != null)
         {
-            if (line == null) yield break;
+            glowLR.SetPosition(0, muzzle);
+            glowLR.SetPosition(1, muzzle);
+        }
 
+        // HDR core colour — brightness > 1 triggers URP Bloom automatically.
+        // The alpha channel still controls fade; additive blending makes it luminous.
+        Color coreColour = new Color(
+            tracerColor.r * tracerBrightness,
+            tracerColor.g * tracerBrightness,
+            tracerColor.b * tracerBrightness,
+            1f);
+        Color coreEnd = new Color(coreColour.r, coreColour.g, coreColour.b, 0f);
+
+        Color haloColour = new Color(
+            tracerColor.r * tracerBrightness * glowHaloAlpha,
+            tracerColor.g * tracerBrightness * glowHaloAlpha,
+            tracerColor.b * tracerBrightness * glowHaloAlpha,
+            1f);
+        Color haloEnd = new Color(haloColour.r, haloColour.g, haloColour.b, 0f);
+
+        // ── Travel phase ───────────────────────────────────────────────────────
+        float   totalDist  = Mathf.Max(0.01f, Vector3.Distance(muzzle, hitPoint));
+        Vector3 dir        = (hitPoint - muzzle) / totalDist;
+        float   travelTime = totalDist / Mathf.Max(1f, bulletSpeed);
+        float   elapsed    = 0f;
+
+        while (elapsed < travelTime)
+        {
+            if (go == null) yield break;
             elapsed += Time.deltaTime;
-            float t = Mathf.Clamp01(elapsed / tracerLifetime);
 
-            // Ease-out fade: fast initial flash, slow tail
-            float fadeT = 1f - (1f - t) * (1f - t);
+            float   headDist = Mathf.Min(elapsed * bulletSpeed, totalDist);
+            float   tailDist = Mathf.Max(0f, headDist - trailLength);
+            Vector3 headPos  = muzzle + dir * headDist;
+            Vector3 tailPos  = muzzle + dir * tailDist;
 
-            line.startColor = Color.Lerp(startColour, endColour, fadeT);
-            line.endColor   = Color.Lerp(endColour,   endColour, fadeT);   // tip always fades
-            line.startWidth = Mathf.Lerp(startWidth, 0f, fadeT);
-            line.endWidth   = line.startWidth * 0.05f;
+            // Core
+            lr.startWidth = tracerWidth;
+            lr.endWidth   = 0f;
+            lr.startColor = coreColour;
+            lr.endColor   = coreEnd;
+            lr.SetPosition(0, tailPos);
+            lr.SetPosition(1, headPos);
+
+            // Halo
+            if (glowLR != null)
+            {
+                glowLR.startWidth = tracerWidth * glowHaloScale;
+                glowLR.endWidth   = 0f;
+                glowLR.startColor = haloColour;
+                glowLR.endColor   = haloEnd;
+                glowLR.SetPosition(0, tailPos);
+                glowLR.SetPosition(1, headPos);
+            }
 
             yield return null;
         }
 
-        if (tracerObj != null) Destroy(tracerObj);
+        // ── Fade phase ─────────────────────────────────────────────────────────
+        float   fadeElapsed = 0f;
+        Vector3 finalHead   = hitPoint;
+
+        while (fadeElapsed < tracerFadeTime)
+        {
+            if (go == null) yield break;
+            fadeElapsed += Time.deltaTime;
+
+            float   t       = fadeElapsed / tracerFadeTime;
+            float   td      = Mathf.Lerp(Mathf.Max(0f, totalDist - trailLength), totalDist, t);
+            Vector3 tailPos = muzzle + dir * td;
+            float   w       = 1f - t;   // width shrinks to 0
+
+            // Core fade
+            lr.startColor = new Color(coreColour.r, coreColour.g, coreColour.b, w);
+            lr.endColor   = coreEnd;
+            lr.startWidth = tracerWidth * w;
+            lr.endWidth   = 0f;
+            lr.SetPosition(0, tailPos);
+            lr.SetPosition(1, finalHead);
+
+            // Halo fade
+            if (glowLR != null)
+            {
+                glowLR.startColor = new Color(haloColour.r, haloColour.g, haloColour.b, w);
+                glowLR.endColor   = haloEnd;
+                glowLR.startWidth = tracerWidth * glowHaloScale * w;
+                glowLR.endWidth   = 0f;
+                glowLR.SetPosition(0, tailPos);
+                glowLR.SetPosition(1, finalHead);
+            }
+
+            yield return null;
+        }
+
+        if (go != null) Destroy(go);
     }
 }

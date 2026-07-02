@@ -281,7 +281,7 @@ public class SensitivityUI : MonoBehaviour
         SensitivityOptimizer.Instance?.ResetModel();
         FindObjectOfType<SensitivityCalibrator>()?.RestartCalibration();
 
-        if (resultText          != null) resultText.text          = "\u2713 Training data cleared. Calibration restarted.";
+        if (resultText          != null) resultText.text          = "Training data cleared. Calibration restarted.";
         if (confidenceText      != null) confidenceText.text      = "";
         if (sessionCountText    != null) sessionCountText.text    = "";
         if (gameConversionsText != null) gameConversionsText.text = "";
@@ -307,7 +307,7 @@ public class SensitivityUI : MonoBehaviour
         }
 
         string msg = deleted > 0
-            ? $"\u2713 Deleted {deleted} session file{(deleted == 1 ? "" : "s")}.\nOptimizer model kept intact."
+            ? $"Deleted {deleted} session file{(deleted == 1 ? "" : "s")}.\nOptimizer model kept intact."
             : "No session files found to delete.";
 
         if (errors.Length > 0)
