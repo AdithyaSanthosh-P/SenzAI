@@ -30,11 +30,16 @@ public class SensitivityUI : MonoBehaviour
     [Tooltip("Text element that shows the recommended sensitivity converted to each real game.")]
     [SerializeField] private TMP_Text gameConversionsText;
 
-    [Header("SenzAI Yaw Calibration")]
-    [Tooltip("Degrees per Unity mouse-delta unit at sensitivity=1. " +
-             "Default 0.022 matches the CS2 baseline used by most Unity FPS controllers. " +
-             "Adjust only if your feel is noticeably off after converting.")]
-    [SerializeField] private float senzaiYaw = 0.022f;
+    [Header("Cross-Game Conversion Scale")]
+    [Tooltip("Correction factor for Windows display scaling.\n" +
+             "Unity Input System reports mouse delta in logical pixels, not raw HID counts.\n" +
+             "Raw-input games (Valorant, CS2) bypass Windows scaling entirely.\n\n" +
+             "Set this to match your Windows Display Scaling setting:\n" +
+             "  100% scaling  →  1.0\n" +
+             "  125% scaling  →  0.8\n" +
+             "  150% scaling  →  0.67\n" +
+             "  200% scaling  →  0.5  (default, common on 1440p/4K)")]
+    [SerializeField] [Range(0.1f, 2.0f)] private float calibrationScale = 0.5f;
 
     // Game yaw constants — same source as SensitivityConverter
     private static readonly Dictionary<string, float> GameYaws = new()
@@ -221,23 +226,53 @@ public class SensitivityUI : MonoBehaviour
     // ── Game conversion breakdown ─────────────────────────────────────────────
 
     /// <summary>
-    /// Converts the recommended SenzAI sensitivity into every supported game
-    /// and displays it in gameConversionsText.
-    /// Formula: targetSens = senzaiSens * (senzaiYaw / targetGameYaw)
-    /// This preserves cm/360° — the physical mouse feel.
+    /// Converts the recommended SenzAI sensitivity to every supported game using cm/360.
+    ///
+    /// WHY cm/360:
+    ///   SenzAI's sensitivity is in "degrees per screen-pixel" (Unity Input System delta).
+    ///   Games like Valorant/CS2 use Raw Input (degrees per HID count).
+    ///   These two scales are NOT directly comparable, so we cannot just ratio yaw values.
+    ///   cm/360 is the physical distance your hand moves for a full rotation — DPI-independent
+    ///   within a single input system, so it is the correct cross-game bridge.
+    ///
+    /// Formula:
+    ///   cm360 = (2.54 * 360) / (DPI * senzaiSens)
+    ///          -- MouseLook: rotation = delta_pixels * sensitivity  →  1 deg/pixel at sens=1
+    ///          -- so effective degrees/inch = DPI * senzaiSens
+    ///
+    ///   targetSens = (2.54 * 360) / (DPI * targetYaw * cm360)
+    ///              = senzaiSens / targetYaw          (DPI cancels here)
+    ///
+    ///   BUT DPI only cancels when both games share the same input pipeline.
+    ///   Since they don't, we keep DPI explicit so future calibration can adjust it.
     /// </summary>
     private void BuildGameConversions(float senzaiSens)
-{
-    if (gameConversionsText == null) return;
-
-    var sb = new System.Text.StringBuilder();
-    foreach (var kvp in GameYaws)
     {
-        float converted = senzaiSens * (senzaiYaw / kvp.Value);
-        sb.Append($"| {kvp.Key}: {converted:F2} |");
+        if (gameConversionsText == null) return;
+
+        // calibrationScale corrects for the mismatch between Unity's logical-pixel mouse delta
+        // and raw-input games (Valorant, CS2, Apex) that bypass Windows display scaling.
+        // At 200% Windows scaling: Unity reads half the physical counts → scale = 0.5
+        // At 100% Windows scaling: Unity reads counts 1:1 → scale = 1.0
+        float correctedSens = senzaiSens * calibrationScale;
+
+        // cm/360 using the corrected sensitivity (at 800 DPI as reference)
+        const float kRefDpi = 800f;
+        float cm360 = (2.54f * 360f) / (kRefDpi * correctedSens);
+
+        var sb = new System.Text.StringBuilder();
+        sb.Append($"cm/360 ≈{cm360:F1} cm  |  ");
+
+        foreach (var kvp in GameYaws)
+        {
+            // targetSens = correctedSens / targetYaw
+            // (same as cm/360 approach — DPI cancels when both use raw input equivalents)
+            float converted = correctedSens / kvp.Value;
+            sb.Append($"{kvp.Key}: {converted:F2}  ");
+        }
+
+        gameConversionsText.text = sb.ToString().TrimEnd();
     }
-    gameConversionsText.text = sb.ToString();
-}
 
     private void OnCloseClicked() => ClosePanel();
 

@@ -10,6 +10,10 @@ public class ShootingController : MonoBehaviour
     public Material tracerMaterial;
     public float tracerWidth    = 0.03f;
     public float tracerLifetime = 0.05f;
+    [Tooltip("How far right of camera centre the tracer spawns (gun position).")]
+    public float gunOffsetRight = 0.25f;
+    [Tooltip("How far below camera centre the tracer spawns (gun position). Positive = down.")]
+    public float gunOffsetDown  = 0.20f;
 
     [Header("Camera Shake")]
     public float shakeDuration  = 0.09f;
@@ -86,7 +90,15 @@ public class ShootingController : MonoBehaviour
         lastShotTime = Time.time;
         sessionShotIndex++;
 
-        CreateTracer(start, end);
+        // Muzzle position: offset from camera in world space so the tracer looks like
+        // it comes from a gun held at hip/chest level rather than straight from the eye.
+        // The raycast still fires from the true camera centre so hit detection is unaffected.
+        Vector3 muzzlePos = cam.transform.position
+            + cam.transform.right   *  gunOffsetRight
+            + cam.transform.up      * -gunOffsetDown;
+
+        CreateTracer(muzzlePos, end);
+
         cameraShake?.Shake(shakeDuration, shakeMagnitude);
 
         if (drawDebugRay)
