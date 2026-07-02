@@ -1,4 +1,6 @@
+using System.Collections;
 using UnityEngine;
+using UnityEngine.Rendering;
 
 public class ShootingController : MonoBehaviour
 {
@@ -7,9 +9,13 @@ public class ShootingController : MonoBehaviour
     public LayerMask hitMask = ~0;
 
     [Header("Tracer")]
-    public Material tracerMaterial;
-    public float tracerWidth    = 0.03f;
-    public float tracerLifetime = 0.05f;
+    public Material tracerMaterial;                          // leave empty — auto-created at runtime
+    [Tooltip("Width of the tracer at the muzzle end.")]
+    public float tracerWidth    = 0.008f;                   // thin like a real bullet streak
+    [Tooltip("How long the tracer takes to fade out.")]
+    public float tracerLifetime = 0.12f;                    // slightly longer so it’s visible
+    [Tooltip("Colour of the tracer streak.")]
+    public Color tracerColor    = new Color(1f, 0.95f, 0.7f, 1f);  // warm yellow-white
     [Tooltip("How far right of camera centre the tracer spawns (gun position).")]
     public float gunOffsetRight = 0.25f;
     [Tooltip("How far below camera centre the tracer spawns (gun position). Positive = down.")]
@@ -196,18 +202,76 @@ public class ShootingController : MonoBehaviour
 
     private void CreateTracer(Vector3 start, Vector3 end)
     {
-        GameObject tracer = new GameObject("Tracer");
-        LineRenderer line = tracer.AddComponent<LineRenderer>();
+        GameObject tracerObj = new GameObject("Tracer");
+        LineRenderer line    = tracerObj.AddComponent<LineRenderer>();
 
-        line.material      = tracerMaterial;
-        line.startWidth    = tracerWidth;
-        line.endWidth      = tracerWidth * 0.5f;
-        line.positionCount = 2;
-        line.useWorldSpace = true;
+        // ── Material ──────────────────────────────────────────────────────────
+        // Use the assigned material if any; otherwise build a simple transparent one.
+        // "Sprites/Default" is guaranteed to exist in every Unity project and supports alpha.
+        if (tracerMaterial != null)
+        {
+            line.material = new Material(tracerMaterial); // instance so we can tint per-shot
+        }
+        else
+        {
+            Shader sh = Shader.Find("Sprites/Default");
+            if (sh == null) sh = Shader.Find("Unlit/Transparent");
+            if (sh == null) sh = Shader.Find("Legacy Shaders/Particles/Alpha Blended");
+            line.material       = new Material(sh != null ? sh : Shader.Find("Unlit/Color"));
+            line.material.color = tracerColor;
+        }
+
+        // ── Shape ─────────────────────────────────────────────────────────────
+        line.positionCount    = 2;
+        line.useWorldSpace    = true;
+        line.startWidth       = tracerWidth;          // wider at muzzle
+        line.endWidth         = tracerWidth * 0.05f;  // tapers to near-nothing at hit
+        line.startColor       = tracerColor;
+        line.endColor         = new Color(tracerColor.r, tracerColor.g, tracerColor.b, 0f);
+
+        // TextureMode.Stretch makes the texture run the full length (clean look).
+        // Alignment.View always faces the camera so it looks like a thin streak,
+        // not a flat plane that vanishes edge-on.
+        line.textureMode      = LineTextureMode.Stretch;
+        line.alignment        = LineAlignment.View;
+        line.shadowCastingMode = ShadowCastingMode.Off;
+        line.receiveShadows   = false;
+        line.generateLightingData = false;
 
         line.SetPosition(0, start);
         line.SetPosition(1, end);
 
-        Destroy(tracer, tracerLifetime);
+        StartCoroutine(FadeTracer(line, tracerObj));
+    }
+
+    // Smoothly shrinks and fades the tracer line over its lifetime, then destroys it.
+    private IEnumerator FadeTracer(LineRenderer line, GameObject tracerObj)
+    {
+        if (line == null || tracerObj == null) yield break;
+
+        Color   startColour = tracerColor;
+        Color   endColour   = new Color(tracerColor.r, tracerColor.g, tracerColor.b, 0f);
+        float   startWidth  = tracerWidth;
+        float   elapsed     = 0f;
+
+        while (elapsed < tracerLifetime)
+        {
+            if (line == null) yield break;
+
+            elapsed += Time.deltaTime;
+            float t = Mathf.Clamp01(elapsed / tracerLifetime);
+
+            // Ease-out fade: fast initial flash, slow tail
+            float fadeT = 1f - (1f - t) * (1f - t);
+
+            line.startColor = Color.Lerp(startColour, endColour, fadeT);
+            line.endColor   = Color.Lerp(endColour,   endColour, fadeT);   // tip always fades
+            line.startWidth = Mathf.Lerp(startWidth, 0f, fadeT);
+            line.endWidth   = line.startWidth * 0.05f;
+
+            yield return null;
+        }
+
+        if (tracerObj != null) Destroy(tracerObj);
     }
 }
